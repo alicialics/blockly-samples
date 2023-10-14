@@ -17,7 +17,6 @@
     <!-- END INJECTED HEADER -->
     <meta charset="utf-8" />
     <title>Blockly Demo: Step Execution with Python Interpreter</title>
-    <script src="mini-coi.js"></script>
     <script src="toolbox.js"></script>
     <script src="./public/blockly/blockly_compressed.js"></script>
     <script src="./public/blockly/blocks_compressed.js"></script>
@@ -71,10 +70,10 @@
 
       <p>
         The generator's <code>python.pythonGenerator.STATEMENT_PREFIX</code> is
-        assigned <code>'highlightBlock(%1);\nbreakpoint()\n'</code>, where
+        assigned <code>'highlightBlock(%1);\nawait breakpoint()\n'</code>, where
         <code>%1</code> is the block ID. The call to
         <code>highlightBlock()</code> will highlight the identified block and
-        <code>breakpoint()</code> will pause the execution.
+        <code>await breakpoint()</code> will pause the execution.
       </p>
 
       <p>
@@ -198,7 +197,7 @@
           toolbox: toolboxJson,
         });
         python.pythonGenerator.STATEMENT_PREFIX =
-          "highlightBlock(%1)\nbreakpoint()\n";
+          "highlightBlock(%1)\nawait breakpoint()\n";
         python.pythonGenerator.addReservedWords("highlightBlock");
         python.pythonGenerator.addReservedWords("nbreakpoint");
         Blockly.serialization.workspaces.load(startBlocks, demoWorkspace);
