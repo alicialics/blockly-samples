@@ -22,7 +22,6 @@
     <script src="./public/blockly/blocks_compressed.js"></script>
     <script src="./public/blockly/python_compressed.js"></script>
     <script src="./public/blockly/msg/en.js"></script>
-    <script src="interpreter.js"></script>
     <style>
       body {
         background-color: #fff;
@@ -69,7 +68,7 @@
 
       <p>
         This is a demo of executing code step-by-step with a sandboxed Python
-        interpreter.
+        interpreter on the main thread.
       </p>
 
       <p>
@@ -203,45 +202,61 @@
         python.pythonGenerator.STATEMENT_PREFIX =
           "highlightBlock(%1)\nawait breakpoint()\n";
         python.pythonGenerator.addReservedWords("highlightBlock");
-        python.pythonGenerator.addReservedWords("nbreakpoint");
+        python.pythonGenerator.addReservedWords("breakpoint");
         Blockly.serialization.workspaces.load(startBlocks, demoWorkspace);
 
         const outputArea = document.getElementById("output");
         const stepButton = document.getElementById("stepButton");
-        let myInterpreter = null;
 
-        function initApi(interpreter, globalObject) {
+        function loadMicropython_() {
+            var INTERPRETER_BASE_PATH = "./public";
+            return new Promise(function (resolve) {
+                import(INTERPRETER_BASE_PATH + "/micropython.mjs").then(function (module) {
+                    module.loadMicroPython({
+                        url: INTERPRETER_BASE_PATH + "/micropython.wasm"
+                    }).then(function (interpreter) {
+                       resolve(interpreter);
+                    });
+                });
+            });
+        }
+        var micropythonPromise = loadMicropython_();
+        let inProgress = null;
+        let micropython = null;
+        micropythonPromise.then(interpreter => { micropython = interpreter; } )
+
+        let abortExecution_;
+        let resumeExecution_;
+
+        function initApi() {
           // Add an API function for the alert() block, generated for "text_print" blocks.
           const wrapperAlert = function alert(text) {
             text = arguments.length ? text : "";
             outputArea.value += "\n" + text;
           };
-          interpreter.setProperty(
-            globalObject,
-            "print",
-            interpreter.createNativeFunction(wrapperAlert),
-          );
+          globalThis.print = wrapperAlert;
 
           // Add an API function for the prompt() block.
           const wrapperPrompt = function prompt(text) {
             return window.prompt(text);
           };
-          interpreter.setProperty(
-            globalObject,
-            "input",
-            interpreter.createNativeFunction(wrapperPrompt),
-          );
+          globalThis.input = wrapperPrompt;
 
           // Add an API function for highlighting blocks.
           const wrapperHighlight = function (id) {
             id = String(id || "");
             return highlightBlock(id);
           };
-          interpreter.setProperty(
-            globalObject,
-            "highlightBlock",
-            interpreter.createNativeFunction(wrapperHighlight),
-          );
+          // globalThis.highlightBlock = highlightBlock;
+
+          function wrapperBreakpoint() {
+            return new Promise(function (resolve, reject) {
+                resumeExecution_ = resolve;
+                abortExecution_ = reject;
+            });
+          }
+
+          globalThis.breakpoint = wrapperBreakpoint;
         }
 
         // Each step will run the interpreter until the highlightPause is true.
@@ -260,39 +275,48 @@
             outputArea.value = "Program output:\n=================";
           }
 
-          if (myInterpreter) {
-            myInterpreter.abort();
+          if (abortExecution_) {
+            abortExecution_();
           }
-          myInterpreter = null;
+          inProgress = null;
         }
 
-        function stepCode() {
-          if (!myInterpreter) {
+        async function stepCode() {
+          let hasMoreCode;
+          if (!inProgress) {
             // First statement of this code.
             // Clear the program output.
             resetStepUi(true);
-            const latestCode =
+            let latestCode =
               python.pythonGenerator.workspaceToCode(demoWorkspace);
-            myInterpreter = new Interpreter(latestCode, initApi);
-
-            // And then show generated code in an alert.
-            // In a timeout to allow the outputArea.value to reset first.
-            setTimeout(function () {
-              alert(
+            latestCode = "from js import highlightBlock, breakpoint, print, input\n" + latestCode;
+            inProgress = true;
+            initApi();
+            alert(
                 "Ready to execute the following code\n" +
                   "===================================\n" +
                   latestCode,
               );
+            await micropython.runPythonAsync(latestCode);
+
+            // And then show generated code in an alert.
+            // In a timeout to allow the outputArea.value to reset first.
+            setTimeout(function () {
               highlightPause = true;
               stepCode();
             }, 1);
             return;
           }
           highlightPause = false;
-          let hasMoreCode;
+          hasMoreCode = true;
 
           try {
-            hasMoreCode = myInterpreter.step();
+            if (resumeExecution_) {
+              resumeExecution_();
+              resumeExecution_ = null;
+            } else {
+              hasMoreCode = false;
+            }
           } finally {
             if (!hasMoreCode) {
               // Program complete, no more code to execute.
